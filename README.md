@@ -6,7 +6,7 @@ local gui = game.CoreGui:WaitForChild("GhostGui")
 gui.MainFrame.Title.Text = "Mini City Tycoon"
 
 ----------------------------------------------------------------
--- 🛑 Add Close (X) Button
+-- 🛑 Close (X) Button - Hides GUI
 ----------------------------------------------------------------
 local closeButton = Instance.new("TextButton")
 closeButton.Parent = gui.MainFrame
@@ -19,13 +19,33 @@ closeButton.TextScaled = true
 closeButton.Font = Enum.Font.GothamBold
 closeButton.BorderSizePixel = 0
 closeButton.ZIndex = 10
+closeButton.AutoButtonColor = true
 
+-- Hover effect
+closeButton.MouseEnter:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+end)
+closeButton.MouseLeave:Connect(function()
+    closeButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+end)
+
+-- Hide GUI on click
 closeButton.MouseButton1Click:Connect(function()
-    gui:Destroy()
+    gui.Enabled = false
 end)
 
 ----------------------------------------------------------------
--- Button: Max Level
+-- ⌨️ Hotkey to Reopen GUI (Right Shift)
+----------------------------------------------------------------
+local UserInputService = game:GetService("UserInputService")
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        gui.Enabled = not gui.Enabled
+    end
+end)
+
+----------------------------------------------------------------
+-- 🧭 Max Level Button
 ----------------------------------------------------------------
 AddContent("TextButton", "Max Level", [[
     local currentFileValue = game:GetService("Players").LocalPlayer.CurrentFile.Value
@@ -33,14 +53,14 @@ AddContent("TextButton", "Max Level", [[
 ]])
 
 ----------------------------------------------------------------
--- Button: Free VIP
+-- 🏅 Free VIP Button
 ----------------------------------------------------------------
 AddContent("TextButton", "Free VIP", [[
     game:GetService("Players").LocalPlayer.Data.Passes.Pass_VIP.Value = true
 ]])
 
 ----------------------------------------------------------------
--- Button: Get All Passes
+-- 🪙 Get All Passes Button
 ----------------------------------------------------------------
 AddContent("TextButton", "Get Passes", [[
     local passes = game:GetService("Players").LocalPlayer.Data.Passes
@@ -53,12 +73,12 @@ AddContent("TextButton", "Get Passes", [[
 ]])
 
 ----------------------------------------------------------------
--- 💰 Button: Add Money
+-- 💰 Add Money Button
 ----------------------------------------------------------------
 AddContent("TextButton", "Add Money", [[
     local currentFileValue = game:GetService("Players").LocalPlayer.CurrentFile.Value
     local money = game:GetService("Players").LocalPlayer.Data.Files[tostring(currentFileValue)].Cash
-    money.Value = money.Value + 1000000  -- Change amount here 💵
+    money.Value = money.Value + 1000000  -- 💵 Change this amount
     game.StarterGui:SetCore("SendNotification", {
         Title = "Money Added";
         Text = "+1,000,000 Cash!";
@@ -67,7 +87,7 @@ AddContent("TextButton", "Add Money", [[
 ]])
 
 ----------------------------------------------------------------
--- ☀️ Toggle: Always Day
+-- ☀️ Always Day Toggle
 ----------------------------------------------------------------
 AddContent("Toogle", "Always Day", [[
     getgenv().AlwaysDay = true
@@ -81,13 +101,13 @@ AddContent("Toogle", "Always Day", [[
 ]])
 
 ----------------------------------------------------------------
--- Fixed Text at the Bottom
+-- 📌 Fixed Text at the Bottom
 ----------------------------------------------------------------
 local TextLabel = AddContent("TextLabel")
 TextLabel.Text = "FELIPEHUB"
 
 ----------------------------------------------------------------
--- 🛡️ Anti-AFK
+-- 🛡️ Anti-AFK Button
 ----------------------------------------------------------------
 AddContent("TextButton", "Anti-AFK", [[
     local VirtualUser = game:GetService("VirtualUser")
