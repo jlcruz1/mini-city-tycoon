@@ -78,7 +78,7 @@ AddContent("TextButton", "Get Passes", [[
 AddContent("TextButton", "Add Money", [[
     local currentFileValue = game:GetService("Players").LocalPlayer.CurrentFile.Value
     local money = game:GetService("Players").LocalPlayer.Data.Files[tostring(currentFileValue)].Cash
-    money.Value = money.Value + 1000000  -- 💵 Change this amount
+    money.Value = money.Value + 1000000000  -- 💵 Change this amount
     game.StarterGui:SetCore("SendNotification", {
         Title = "Money Added";
         Text = "+1,000,000 Cash!";
