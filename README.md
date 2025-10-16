@@ -1,41 +1,65 @@
--- Load Ghost GUI
+-- Load Ghost GUI Library
 loadstring(game:HttpGet('https://raw.githubusercontent.com/GhostPlayer352/UI-Library/refs/heads/main/Ghost%20Gui'))()
 
 -- Wait for GUI to load and change the title
 local gui = game.CoreGui:WaitForChild("GhostGui")
-gui.MainFrame.Title.Text = "Mini City Tycoon"
+gui.MainFrame.Title.Text = "Elizabeth Menu"
 
 ----------------------------------------------------------------
--- 🛑 Close (X) Button - Hides GUI
+-- 🪄 UI Enhancement: Rounded Corners + Shadow
+----------------------------------------------------------------
+local function beautify(frame)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "Shadow"
+    shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+    shadow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    shadow.Size = UDim2.new(1, 20, 1, 20)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxassetid://1316045217"
+    shadow.ImageColor3 = Color3.new(0, 0, 0)
+    shadow.ImageTransparency = 0.5
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    shadow.ZIndex = -1
+    shadow.Parent = frame
+end
+
+-- Apply style to main frame
+beautify(gui.MainFrame)
+
+----------------------------------------------------------------
+-- ❌ Close (X) Button with Better Style
 ----------------------------------------------------------------
 local closeButton = Instance.new("TextButton")
 closeButton.Parent = gui.MainFrame
 closeButton.Size = UDim2.new(0, 25, 0, 25)
-closeButton.Position = UDim2.new(1, -30, 0, 5) -- top right corner
-closeButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+closeButton.Position = UDim2.new(1, -35, 0, 8)
+closeButton.BackgroundColor3 = Color3.fromRGB(220, 20, 60)
 closeButton.Text = "X"
 closeButton.TextColor3 = Color3.new(1, 1, 1)
 closeButton.TextScaled = true
 closeButton.Font = Enum.Font.GothamBold
 closeButton.BorderSizePixel = 0
 closeButton.ZIndex = 10
-closeButton.AutoButtonColor = true
+beautify(closeButton)
 
--- Hover effect
 closeButton.MouseEnter:Connect(function()
     closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
 end)
 closeButton.MouseLeave:Connect(function()
-    closeButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 20, 60)
 end)
 
--- Hide GUI on click
 closeButton.MouseButton1Click:Connect(function()
     gui.Enabled = false
 end)
 
 ----------------------------------------------------------------
--- ⌨️ Hotkey to Reopen GUI (Right Shift)
+-- ⌨️ Right Shift Hotkey to Reopen GUI
 ----------------------------------------------------------------
 local UserInputService = game:GetService("UserInputService")
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -73,15 +97,32 @@ AddContent("TextButton", "Get Passes", [[
 ]])
 
 ----------------------------------------------------------------
--- 💰 Add Money Button
+-- 💰 Realistic Add Money Button (Tries to Fire Remotes)
 ----------------------------------------------------------------
 AddContent("TextButton", "Add Money", [[
-    local currentFileValue = game:GetService("Players").LocalPlayer.CurrentFile.Value
-    local money = game:GetService("Players").LocalPlayer.Data.Files[tostring(currentFileValue)].Cash
-    money.Value = money.Value + 1000000000  -- 💵 Change this amount
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    local found = 0
+
+    for _, v in pairs(game:GetDescendants()) do
+        if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+            local name = string.lower(v.Name)
+            if string.find(name, "cash") or string.find(name, "money") or string.find(name, "reward") then
+                found = found + 1
+                pcall(function()
+                    if v:IsA("RemoteEvent") then
+                        v:FireServer(1000000) -- 💵 amount
+                    else
+                        v:InvokeServer(1000000)
+                    end
+                end)
+            end
+        end
+    end
+
     game.StarterGui:SetCore("SendNotification", {
-        Title = "Money Added";
-        Text = "+1,000,000 Cash!";
+        Title = "Add Money";
+        Text = "Fired "..found.." remote(s) for +1,000,000 cash!";
         Duration = 5;
     })
 ]])
@@ -101,10 +142,10 @@ AddContent("Toogle", "Always Day", [[
 ]])
 
 ----------------------------------------------------------------
--- 📌 Fixed Text at the Bottom
+-- 📌 Fixed Text at the Bottom (Changed to Elizabeth)
 ----------------------------------------------------------------
 local TextLabel = AddContent("TextLabel")
-TextLabel.Text = "FELIPEHUB"
+TextLabel.Text = "Elizabeth"
 
 ----------------------------------------------------------------
 -- 🛡️ Anti-AFK Button
