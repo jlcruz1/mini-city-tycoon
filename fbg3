@@ -1,0 +1,528 @@
+-- UnifiedSetup_CombatSystem.lua
+-- Place this single Script in ServerScriptService in Roblox Studio.
+-- It will:
+--  1) Create ReplicatedStorage.Remotes (RemoteEvents) if missing
+--  2) Create leaderstats for players
+--  3) Install server-side handlers (weapons, money, fruits, respawn)
+--  4) Create a LocalScript under StarterPlayerScripts that builds the Combat UI
+--
+-- NOTE: This script is intended to be used by the *developer* inside your own place.
+-- Do NOT use it to inject into other people's games or for cheating.
+
+local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local StarterPlayer = game:GetService("StarterPlayer")
+local StarterPlayerScripts = StarterPlayer:WaitForChild("StarterPlayerScripts")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+-- ===== Helper: ensure a child exists and return it =====
+local function ensureFolder(parent, name)
+    local f = parent:FindFirstChild(name)
+    if not f then
+        f = Instance.new("Folder")
+        f.Name = name
+        f.Parent = parent
+    end
+    return f
+end
+
+local function ensureRemote(parent, name)
+    local r = parent:FindFirstChild(name)
+    if not r then
+        r = Instance.new("RemoteEvent")
+        r.Name = name
+        r.Parent = parent
+    end
+    return r
+end
+
+-- ===== Create Remotes folder and RemoteEvents =====
+local remotesFolder = ensureFolder(ReplicatedStorage, "Remotes")
+local remoteNames = {"UseWeapon", "AddMoney", "DamageEvent", "RespawnEvent", "UseFruit"}
+for _, rn in ipairs(remoteNames) do
+    ensureRemote(remotesFolder, rn)
+end
+
+local UseWeaponRE = remotesFolder:FindFirstChild("UseWeapon")
+local AddMoneyRE = remotesFolder:FindFirstChild("AddMoney")
+local UseFruitRE = remotesFolder:FindFirstChild("UseFruit")
+local RespawnRE = remotesFolder:FindFirstChild("RespawnEvent")
+-- DamageEvent is left for extension if you want explicit damage reporting
+local DamageEventRE = remotesFolder:FindFirstChild("DamageEvent")
+
+-- ===== Server: Leaderstats =====
+Players.PlayerAdded:Connect(function(player)
+    local leaderstats = Instance.new("Folder")
+    leaderstats.Name = "leaderstats"
+    leaderstats.Parent = player
+
+    local kills = Instance.new("IntValue")
+    kills.Name = "Kills"
+    kills.Value = 0
+    kills.Parent = leaderstats
+
+    local coins = Instance.new("IntValue")
+    coins.Name = "Coins"
+    coins.Value = 0
+    coins.Parent = leaderstats
+
+    local fruit = Instance.new("StringValue")
+    fruit.Name = "Fruit"
+    fruit.Value = "None"
+    fruit.Parent = leaderstats
+end)
+
+-- ===== Server: Weapon Handler (secure validation) =====
+do
+    local HIT_DISTANCE = 8 -- studs
+    local DAMAGE_TABLE = {
+        Sword = 30,
+        Bow = 20,
+        Staff = 18
+    }
+    local COOLDOWN = {
+        Sword = 0.6,
+        Bow = 0.9,
+        Staff = 0.8
+    }
+
+    -- store last used times per player
+    local lastUsed = setmetatable({}, {__mode = "k"}) -- weak keys
+
+    local function raycastFromRoot(originPart, distance)
+        local params = RaycastParams.new()
+        -- blacklist own character to avoid self-hit
+        params.FilterDescendantsInstances = {originPart.Parent}
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        params.IgnoreWater = true
+        local origin = originPart.Position
+        local direction = originPart.CFrame.LookVector * distance
+        return workspace:Raycast(origin, direction, params)
+    end
+
+    UseWeaponRE.OnServerEvent:Connect(function(player, data)
+        -- data expected: { weapon = "Sword" }
+        if type(data) ~= "table" or type(data.weapon) ~= "string" then return end
+        local weapon = data.weapon
+        if not DAMAGE_TABLE[weapon] then return end
+
+        local now = tick()
+        lastUsed[player] = lastUsed[player] or {}
+        if lastUsed[player][weapon] and now - lastUsed[player][weapon] < (COOLDOWN[weapon] or 0.5) then
+            return -- rate limited
+        end
+        lastUsed[player][weapon] = now
+
+        -- Validate character & state
+        local char = player.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not root or not humanoid or humanoid.Health <= 0 then return end
+
+        -- Raycast forward
+        local ray = raycastFromRoot(root, HIT_DISTANCE)
+        if not ray or not ray.Instance then return end
+        local hitModel = ray.Instance:FindFirstAncestorOfClass("Model")
+        if not hitModel then return end
+        if hitModel == char then return end
+        local targetHum = hitModel:FindFirstChildOfClass("Humanoid")
+        local targetRoot = hitModel:FindFirstChild("HumanoidRootPart")
+        if not targetHum or targetHum.Health <= 0 or not targetRoot then return end
+
+        -- distance check buffer
+        local dist = (targetRoot.Position - root.Position).Magnitude
+        if dist > HIT_DISTANCE + 1 then return end
+
+        -- Apply damage server-side
+        local damage = DAMAGE_TABLE[weapon] or 10
+        targetHum:TakeDamage(damage)
+
+        -- Optionally emit DamageEvent for client VFX/analytics (won't change state)
+        if DamageEventRE then
+            pcall(function()
+                DamageEventRE:FireAllClients({
+                    attacker = player,
+                    target = hitModel,
+                    damage = damage,
+                    weapon = weapon
+                })
+            end)
+        end
+
+        -- Track last attacker on target for kill credit (store on humanoid)
+        -- We attach a temporary ObjectValue on the humanoid to remember the last attacker/player
+        pcall(function()
+            if targetHum and targetHum.Parent then
+                local lastAttackerTag = targetHum:FindFirstChild("_LastAttacker")
+                if not lastAttackerTag then
+                    lastAttackerTag = Instance.new("ObjectValue")
+                    lastAttackerTag.Name = "_LastAttacker"
+                    lastAttackerTag.Parent = targetHum
+                end
+                lastAttackerTag.Value = player
+                -- auto-clear after 6 seconds to avoid stale tags
+                delay(6, function()
+                    if lastAttackerTag and lastAttackerTag.Parent then
+                        lastAttackerTag:Destroy()
+                    end
+                end)
+            end
+        end)
+    end)
+end
+
+-- ===== Server: Money Handler =====
+do
+    AddMoneyRE.OnServerEvent:Connect(function(player, amount)
+        if type(amount) ~= "number" then return end
+        -- Optional: sanity check (e.g., allow only in dev builds); here we clamp amount
+        local safeAmount = math.clamp(math.floor(amount), 1, 10000)
+        local stats = player:FindFirstChild("leaderstats")
+        if stats and stats:FindFirstChild("Coins") then
+            stats.Coins.Value = stats.Coins.Value + safeAmount
+        end
+    end)
+end
+
+-- ===== Server: Fruit Abilities =====
+do
+    local COOLDOWN = 8
+    local durations = {
+        SwiftFruit = 3
+    }
+    local cooldowns = setmetatable({}, {__mode = "k"})
+
+    UseFruitRE.OnServerEvent:Connect(function(player, abilityName)
+        if type(abilityName) ~= "string" then return end
+        local now = tick()
+        if cooldowns[player] and now - cooldowns[player] < COOLDOWN then
+            return
+        end
+        cooldowns[player] = now
+
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+
+        if abilityName == "SwiftFruit" then
+            local originalWalk = hum.WalkSpeed
+            hum.WalkSpeed = math.min(originalWalk + 24, 80)
+            local dur = durations[abilityName] or 3
+            task.delay(dur, function()
+                if hum and hum.Parent then
+                    hum.WalkSpeed = originalWalk
+                end
+            end)
+        end
+    end)
+
+    Players.PlayerRemoving:Connect(function(player)
+        cooldowns[player] = nil
+    end)
+end
+
+-- ===== Server: Respawn Handler (safe) =====
+do
+    RespawnRE.OnServerEvent:Connect(function(player)
+        -- Allow players to "kill" themselves safely via server
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.Health = 0
+                return
+            end
+        end
+        -- fallback to forced respawn
+        pcall(function()
+            player:LoadCharacter()
+        end)
+    end)
+end
+
+-- ===== Server: Award kill credit when humanoid dies =====
+-- This listens to all humanoids as they appear in workspace (characters) and awards kill/coins to the stored last attacker.
+do
+    local function onCharacterHumanoidAdded(character)
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Died:Connect(function()
+                local lastAttackerTag = humanoid:FindFirstChild("_LastAttacker")
+                if lastAttackerTag and lastAttackerTag.Value and lastAttackerTag.Value:IsA("Player") then
+                    local killer = lastAttackerTag.Value
+                    -- award kill and coins
+                    local killerStats = killer:FindFirstChild("leaderstats")
+                    if killerStats and killerStats:FindFirstChild("Kills") then
+                        killerStats.Kills.Value = killerStats.Kills.Value + 1
+                    end
+                    if killerStats and killerStats:FindFirstChild("Coins") then
+                        killerStats.Coins.Value = killerStats.Coins.Value + 50 -- reward tuneable
+                    end
+                end
+            end)
+        end
+    end
+
+    -- Connect for any character already present (serverside characters spawn in workspace)
+    for _, model in ipairs(workspace:GetDescendants()) do
+        if model:IsA("Model") and model:FindFirstChildOfClass("Humanoid") then
+            onCharacterHumanoidAdded(model)
+        end
+    end
+
+    -- Monitor future characters added to workspace
+    workspace.DescendantAdded:Connect(function(desc)
+        if desc:IsA("Model") and desc:FindFirstChildOfClass("Humanoid") then
+            onCharacterHumanoidAdded(desc)
+        end
+    end)
+end
+
+-- ===== Create LocalScript under StarterPlayerScripts (client UI + local bindings) =====
+-- This LocalScript will create the GUI and bind button clicks to the RemoteEvents we created above.
+-- If a LocalScript named "ElizabethCombatUIClient" already exists, we will not overwrite it.
+
+do
+    local existing = StarterPlayerScripts:FindFirstChild("ElizabethCombatUIClient")
+    if not existing then
+        local ls = Instance.new("LocalScript")
+        ls.Name = "ElizabethCombatUIClient"
+
+        -- LocalScript source: UI creation and client-side behavior
+        -- Note: this code runs on each client and uses Remotes for server actions.
+        ls.Source = [[
+-- ElizabethCombatUIClient (auto-generated) --
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local UseWeaponRE = remotes:WaitForChild("UseWeapon")
+local AddMoneyRE = remotes:WaitForChild("AddMoney")
+local UseFruitRE = remotes:WaitForChild("UseFruit")
+local RespawnRE = remotes:WaitForChild("RespawnEvent")
+
+-- build UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ElizabethCombatUI"
+screenGui.ResetOnSpawn = false
+screenGui.DisplayOrder = 50
+screenGui.Parent = playerGui
+screenGui.IgnoreGuiInset = true
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 320, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -160, 0.78, -100)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local UICorner = Instance.new("UICorner", mainFrame)
+UICorner.CornerRadius = UDim.new(0, 10)
+local UIStroke = Instance.new("UIStroke", mainFrame)
+UIStroke.Thickness = 1.5
+UIStroke.Color = Color3.fromRGB(200, 200, 200)
+
+-- draggable
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- title
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, 0, 0, 36)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 = Color3.new(1,1,1)
+title.Text = "⚔ Elizabeth Combat Hub ⚔"
+
+-- close button
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -30, 0, 6)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+local closeCorner = Instance.new("UICorner", closeBtn)
+closeCorner.CornerRadius = UDim.new(0,5)
+closeBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+end)
+
+-- health bar
+local healthBarBG = Instance.new("Frame", mainFrame)
+healthBarBG.Position = UDim2.new(0, 10, 0, 44)
+healthBarBG.Size = UDim2.new(1, -20, 0, 26)
+healthBarBG.BackgroundColor3 = Color3.fromRGB(60,60,60)
+local healthBar = Instance.new("Frame", healthBarBG)
+healthBar.Name = "Health"
+healthBar.Size = UDim2.new(1,0,1,0)
+healthBar.BackgroundColor3 = Color3.fromRGB(0,200,0)
+local healthText = Instance.new("TextLabel", healthBarBG)
+healthText.Size = UDim2.new(1,0,1,0)
+healthText.BackgroundTransparency = 1
+healthText.Font = Enum.Font.GothamBold
+healthText.TextSize = 14
+healthText.TextColor3 = Color3.fromRGB(255,255,255)
+healthText.Text = "Health: -- / --"
+
+-- helper: button pulse
+local function pulseButton(button)
+    local orig = button.Size
+    local t1 = TweenService:Create(button, TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Size = orig + UDim2.new(0,5,0,5)})
+    local t2 = TweenService:Create(button, TweenInfo.new(0.08, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Size = orig})
+    t1:Play()
+    t1.Completed:Wait()
+    t2:Play()
+end
+
+-- weapon buttons
+local weapons = {"Sword", "Bow", "Staff"}
+for i, weapon in ipairs(weapons) do
+    local btn = Instance.new("TextButton", mainFrame)
+    btn.Size = UDim2.new(0, 90, 0, 34)
+    btn.Position = UDim2.new(0, 10 + (i-1) * 100, 0, 84)
+    btn.Text = weapon
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    local corner = Instance.new("UICorner", btn); corner.CornerRadius = UDim.new(0,5)
+
+    btn.MouseButton1Click:Connect(function()
+        pulseButton(btn)
+        UseWeaponRE:FireServer({weapon = weapon})
+    end)
+end
+
+-- money & kill buttons
+local addMoneyBtn = Instance.new("TextButton", mainFrame)
+addMoneyBtn.Size = UDim2.new(0, 140, 0, 34)
+addMoneyBtn.Position = UDim2.new(0, 10, 0, 132)
+addMoneyBtn.Text = "💵 Add Money"
+addMoneyBtn.Font = Enum.Font.GothamBold
+addMoneyBtn.TextSize = 14
+addMoneyBtn.BackgroundColor3 = Color3.fromRGB(40,120,40)
+local cornerMoney = Instance.new("UICorner", addMoneyBtn); cornerMoney.CornerRadius = UDim.new(0,5)
+addMoneyBtn.MouseButton1Click:Connect(function()
+    pulseButton(addMoneyBtn)
+    AddMoneyRE:FireServer(100)
+end)
+
+local killBtn = Instance.new("TextButton", mainFrame)
+killBtn.Size = UDim2.new(0, 140, 0, 34)
+killBtn.Position = UDim2.new(0, 160, 0, 132)
+killBtn.Text = "💀 Kill"
+killBtn.Font = Enum.Font.GothamBold
+killBtn.TextSize = 14
+killBtn.BackgroundColor3 = Color3.fromRGB(120,40,40)
+local cornerKill = Instance.new("UICorner", killBtn); cornerKill.CornerRadius = UDim.new(0,5)
+killBtn.MouseButton1Click:Connect(function()
+    pulseButton(killBtn)
+    RespawnRE:FireServer()
+end)
+
+-- Reopen toggle
+local reopenBtn = Instance.new("TextButton", screenGui)
+reopenBtn.Name = "ToggleButton"
+reopenBtn.Size = UDim2.new(0, 100, 0, 40)
+reopenBtn.Position = UDim2.new(0, 10, 1, -60)
+reopenBtn.AnchorPoint = Vector2.new(0, 0)
+reopenBtn.Text = "Menu"
+reopenBtn.Font = Enum.Font.GothamBold
+reopenBtn.TextSize = 16
+reopenBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+reopenBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local reopenCorner = Instance.new("UICorner", reopenBtn); reopenCorner.CornerRadius = UDim.new(0,6)
+reopenBtn.MouseButton1Click:Connect(function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
+
+-- health listener binding
+local function setupHealthListener(humanoid)
+    if not humanoid then return end
+    healthText.Text = string.format("Health: %d / %d", math.floor(humanoid.Health), humanoid.MaxHealth)
+    healthBar.Size = UDim2.new(math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1), 0, 1, 0)
+    humanoid.HealthChanged:Connect(function(health)
+        local max = humanoid.MaxHealth
+        local percent = math.clamp(health / max, 0, 1)
+        healthBar.Size = UDim2.new(percent, 0, 1, 0)
+        healthText.Text = string.format("Health: %d / %d", math.floor(health), max)
+        if percent < 0.3 then
+            healthBar.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+        else
+            healthBar.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+        end
+    end)
+end
+
+local function bindToCharacter(character)
+    local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid")
+    setupHealthListener(humanoid)
+end
+
+if player.Character then bindToCharacter(player.Character) end
+player.CharacterAdded:Connect(bindToCharacter)
+
+-- Optional: listen for DamageEvent for client-side VFX (non-authoritative)
+if remotes:FindFirstChild("DamageEvent") then
+    remotes.DamageEvent.OnClientEvent:Connect(function(payload)
+        -- payload: { attacker = Player, target = Model, damage = number, weapon = string }
+        -- Implement client-only visuals here (e.g., floating damage text)
+        -- Keep this purely cosmetic; server is authoritative for health/kills.
+    end)
+end
+]]
+
+        -- Parent the LocalScript into StarterPlayerScripts so each client receives it
+        ls.Parent = StarterPlayerScripts
+        print("ElizabethCombatUIClient LocalScript installed in StarterPlayerScripts.")
+    else
+        print("ElizabethCombatUIClient already exists in StarterPlayerScripts; not overwriting.")
+    end
+end
+
+print("Unified combat system setup complete. Server handlers are active and client UI script has been installed.")
