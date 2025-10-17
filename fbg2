@@ -1,0 +1,234 @@
+-- ✅ ELIZABETH COMBAT GUI SCRIPT
+-- Put this LocalScript inside StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Remotes (make sure they exist in ReplicatedStorage > Remotes)
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local damageEvent = remotes:WaitForChild("DamageEvent")
+local respawnEvent = remotes:WaitForChild("RespawnEvent")
+
+-- Main GUI container
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ElizabethCombatUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 300, 0, 180)
+mainFrame.Position = UDim2.new(0.5, -150, 0.8, -90)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = mainFrame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Thickness = 2
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Parent = mainFrame
+
+-- Draggable functionality
+local dragging, dragInput, dragStart, startPos
+
+local function update(input)
+	local delta = input.Position - dragStart
+	mainFrame.Position = UDim2.new(
+		startPos.X.Scale,
+		startPos.X.Offset + delta.X,
+		startPos.Y.Scale,
+		startPos.Y.Offset + delta.Y
+	)
+end
+
+mainFrame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		update(input)
+	end
+end)
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Text = "⚔ Elizabeth Combat Hub ⚔"
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Parent = mainFrame
+
+-- Close Button
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 25, 0, 25)
+closeBtn.Position = UDim2.new(1, -30, 0, 7)
+closeBtn.Text = "X"
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.Parent = mainFrame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeBtn
+
+closeBtn.MouseButton1Click:Connect(function()
+	mainFrame.Visible = false
+end)
+
+-- Health Bar
+local healthBarBG = Instance.new("Frame")
+healthBarBG.Size = UDim2.new(1, -20, 0, 25)
+healthBarBG.Position = UDim2.new(0, 10, 0, 45)
+healthBarBG.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+healthBarBG.BorderSizePixel = 0
+healthBarBG.Parent = mainFrame
+
+local healthBar = Instance.new("Frame")
+healthBar.Size = UDim2.new(1, 0, 1, 0)
+healthBar.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+healthBar.BorderSizePixel = 0
+healthBar.Parent = healthBarBG
+
+local healthText = Instance.new("TextLabel")
+healthText.Size = UDim2.new(1, 0, 1, 0)
+healthText.BackgroundTransparency = 1
+healthText.Font = Enum.Font.GothamBold
+healthText.TextSize = 14
+healthText.TextColor3 = Color3.new(1, 1, 1)
+healthText.Text = "Health: 100 / 100"
+healthText.Parent = healthBarBG
+
+-- Weapon Buttons
+local weapons = {"Sword", "Bow", "Staff"}
+for i, weapon in ipairs(weapons) do
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 80, 0, 30)
+	btn.Position = UDim2.new(0, 10 + (i - 1) * 95, 0, 80)
+	btn.Text = weapon
+	btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.Font = Enum.Font.Gotham
+	btn.TextSize = 14
+	btn.Parent = mainFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 5)
+	corner.Parent = btn
+
+	btn.MouseButton1Click:Connect(function()
+		-- Placeholder for actual combat logic
+		print(weapon .. " used")
+	end)
+end
+
+-- Add Money Button
+local addMoneyBtn = Instance.new("TextButton")
+addMoneyBtn.Size = UDim2.new(0, 120, 0, 30)
+addMoneyBtn.Position = UDim2.new(0, 10, 0, 125)
+addMoneyBtn.Text = "💵 Add Money"
+addMoneyBtn.BackgroundColor3 = Color3.fromRGB(40, 120, 40)
+addMoneyBtn.TextColor3 = Color3.new(1, 1, 1)
+addMoneyBtn.Font = Enum.Font.GothamBold
+addMoneyBtn.TextSize = 14
+addMoneyBtn.Parent = mainFrame
+
+local cornerMoney = Instance.new("UICorner")
+cornerMoney.CornerRadius = UDim.new(0, 5)
+cornerMoney.Parent = addMoneyBtn
+
+addMoneyBtn.MouseButton1Click:Connect(function()
+	print("💰 Add Money Clicked")
+end)
+
+-- Kill Button
+local killBtn = Instance.new("TextButton")
+killBtn.Size = UDim2.new(0, 120, 0, 30)
+killBtn.Position = UDim2.new(0, 160, 0, 125)
+killBtn.Text = "💀 Kill"
+killBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+killBtn.TextColor3 = Color3.new(1, 1, 1)
+killBtn.Font = Enum.Font.GothamBold
+killBtn.TextSize = 14
+killBtn.Parent = mainFrame
+
+local cornerKill = Instance.new("UICorner")
+cornerKill.CornerRadius = UDim.new(0, 5)
+cornerKill.Parent = killBtn
+
+killBtn.MouseButton1Click:Connect(function()
+	local char = player.Character
+	if char and char:FindFirstChild("Humanoid") then
+		char.Humanoid.Health = 0
+	end
+end)
+
+-- Reopen Toggle Button
+local reopenBtn = Instance.new("TextButton")
+reopenBtn.Size = UDim2.new(0, 100, 0, 40)
+reopenBtn.Position = UDim2.new(0, 10, 1, -50)
+reopenBtn.Text = "Menu"
+reopenBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+reopenBtn.TextColor3 = Color3.new(1, 1, 1)
+reopenBtn.Font = Enum.Font.GothamBold
+reopenBtn.TextSize = 16
+reopenBtn.Parent = screenGui
+
+local reopenCorner = Instance.new("UICorner")
+reopenCorner.CornerRadius = UDim.new(0, 5)
+reopenCorner.Parent = reopenBtn
+
+reopenBtn.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+end)
+
+-- Health bar updater
+local function setupHealthListener(humanoid)
+	humanoid.HealthChanged:Connect(function(health)
+		local max = humanoid.MaxHealth
+		healthBar.Size = UDim2.new(health / max, 0, 1, 0)
+		healthText.Text = string.format("Health: %d / %d", math.floor(health), max)
+		if health / max < 0.3 then
+			healthBar.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+		else
+			healthBar.BackgroundColor3 = Color3.fromRGB(0, 200, 0)
+		end
+	end)
+end
+
+if player.Character and player.Character:FindFirstChild("Humanoid") then
+	setupHealthListener(player.Character.Humanoid)
+end
+
+player.CharacterAdded:Connect(function(char)
+	local hum = char:WaitForChild("Humanoid")
+	setupHealthListener(hum)
+end)
